@@ -1,37 +1,42 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import styled from "styled-components";
 import LogOut from "./LogOut";
 import ChatInput from "./ChatInput";
 import axios from "axios";
 import { getAllMessagesRoute, sendMessageRoute } from "../utils/APIRoutes";
+import { v4 as uuidv4 } from "uuid";
 
-export default function ChatContainer({ currentChat, currentUser }) {
+export default function ChatContainer({ currentChat, currentUser, socket }) {
   const [messages, setMessages] = useState([]);
+  const [arrivalMessage, setArrivalMessage] = useState(null);
+  const scrollRef = useRef();
 
   useEffect(() => {
     const userChange = async () => {
-      if (!currentUser || !currentUser._id) {
-        console.error("currentUser is null or does not have an _id");
-        return;
-      }
-      if (!currentChat || !currentChat._id) {
-        console.error("currentChat is null or does not have an _id");
-        return;
-      }
-      try {
-        const response = await axios.post(getAllMessagesRoute, {
-          from: currentUser._id,
-          to: currentChat._id,
-        });
-        // console.log("API Response:", response.data);
-        setMessages(
-          Array.isArray(response.data.projectedMessages)
-            ? response.data.projectedMessages
-            : []
-        );
-      } catch (error) {
-        console.error("Error fetching messages:", error);
-        setMessages([]);
+        if(currentChat){
+        if (!currentUser || !currentUser._id) {
+          console.error("currentUser is null or does not have an _id");
+          return;
+        }
+        if (!currentChat || !currentChat._id) {
+          console.error("currentChat is null or does not have an _id");
+          return;
+        }
+        try {
+          const response = await axios.post(getAllMessagesRoute, {
+            from: currentUser._id,
+            to: currentChat._id,
+          });
+          // console.log("API Response:", response.data);
+          setMessages(
+            Array.isArray(response.data.projectedMessages)
+              ? response.data.projectedMessages
+              : []
+          );
+        } catch (error) {
+          console.error("Error fetching messages:", error);
+          setMessages([]);
+        }
       }
     };
     userChange();
@@ -41,18 +46,44 @@ export default function ChatContainer({ currentChat, currentUser }) {
 
   const handleSendMsg = async (msg) => {
     try {
-      const response = await axios.post(sendMessageRoute, {
-        from: currentUser._id,
-        to: currentChat._id,
-        message: msg,
-      });
-      if (response.data.success) {
-        setMessages((prev) => [...prev, { fromSelf: true, message: msg }]);
-      }
-    } catch (error) {
+        const response = await axios.post(sendMessageRoute, {
+          from: currentUser._id,
+          to: currentChat._id,
+          message: msg,
+        });
+        if (response.data.success) {
+          setMessages((prev) => [...prev, { fromSelf: true, message: msg }]);
+        }
+        socket.current.emit("send-msg", {
+          to: currentChat._id,
+          from: currentUser._id,
+          message: msg,
+        })
+        const msgs = [...messages];
+        msgs.push({ fromSelf: true, message: msg })
+        setMessages(msgs);
+    }
+    catch (error) {
       console.error("Error sending message:", error);
     }
   };
+
+  useEffect(() => {
+    if(socket.current){
+      socket.current.on("msg-receive", (msg) => {
+        setArrivalMessage({ fromSelf: false, message: msg })
+      });
+    }
+  },[]);
+
+  useEffect(() => {
+    arrivalMessage && setMessages((prev) => [...prev, arrivalMessage]);
+  }, [arrivalMessage])
+
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ behaviour: "smooth" })
+  },[messages])
+
 
   return (
     <>
@@ -81,7 +112,7 @@ export default function ChatContainer({ currentChat, currentUser }) {
             {
               messages.map((message) => {
                   return (
-                      <div >
+                      <div ref={scrollRef} key={uuidv4()} >
                           <div className={`message ${message.fromSelf ? "sended" : "received" }`} >
                               <div className="content">
                                   <p>
@@ -137,6 +168,14 @@ const Container = styled.div`
     flex-direction: column;
     gap: 1rem;
     overflow: auto;
+    &::-webkit-scrollbar {
+      width: 0.2rem;
+      &-thumb{
+        background-color: #ffffff39;
+        width: 0.1rem;
+        border-radius: 1rem;
+      }
+    }
     .message {
       display: flex;
       align-items: center;
